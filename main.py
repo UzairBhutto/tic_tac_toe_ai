@@ -9,7 +9,7 @@ from sklearn.ensemble import RandomForestClassifier
 
 # ================= DATABASE =================
 
-conn = sqlite3.connect("game.db")
+conn = sqlite3.connect("tictactoe.db")
 cur = conn.cursor()
 
 cur.execute("""
@@ -36,7 +36,7 @@ def register_user(u, p):
         cur.execute("INSERT INTO users VALUES (?,?)", (u, p))
         conn.commit()
         return True
-    except:
+    except sqlite3.IntegrityError:
         return False
 
 
@@ -46,13 +46,18 @@ def login_user(u, p):
 
 
 def save_result(user, result, diff):
-    cur.execute("INSERT INTO history(username,result,difficulty) VALUES (?,?,?)",
-                (user, result, diff))
+    cur.execute(
+        "INSERT INTO history(username,result,difficulty) VALUES (?,?,?)",
+        (user, result, diff)
+    )
     conn.commit()
 
 
-def get_stats(user):
-    cur.execute("SELECT result,difficulty FROM history WHERE username=?", (user,))
+def get_stats(user, difficulty):
+    cur.execute("""
+        SELECT result FROM history 
+        WHERE username=? AND difficulty=?
+    """, (user, difficulty))
     return cur.fetchall()
 
 
@@ -172,7 +177,6 @@ def best_minimax(board):
 # ================= AI =================
 
 def ai_move(board, diff):
-
     empty = available(board)
     if len(empty) == 0:
         return
@@ -202,18 +206,10 @@ class Login(QWidget):
         super().__init__()
         self.parent = parent
 
-        self.setStyleSheet("""
-            QWidget { background-color: #1e1e2f; color: white; }
-            QLineEdit { padding: 10px; border-radius: 8px; }
-            QPushButton { background-color: #3b82f6; padding: 10px; border-radius: 8px; }
-            QPushButton:hover { background-color: #2563eb; }
-        """)
-
         layout = QVBoxLayout()
 
         title = QLabel("TIC TAC TOE LOGIN")
         title.setAlignment(Qt.AlignCenter)
-        title.setStyleSheet("font-size: 18px; font-weight: bold;")
 
         self.u = QLineEdit()
         self.u.setPlaceholderText("Username")
@@ -257,25 +253,15 @@ class Game(QWidget):
         super().__init__()
         self.parent = parent
         self.board = np.zeros(9)
-        self.diff = "Medium"
-
-        self.setStyleSheet("""
-            QWidget { background-color: #111827; color: white; }
-            QPushButton {
-                background-color: #374151;
-                color: white;
-                font-size: 18px;
-                border-radius: 10px;
-            }
-            QPushButton:hover { background-color: #4b5563; }
-        """)
 
         layout = QVBoxLayout()
 
         self.combo = QComboBox()
         self.combo.addItems(["Easy", "Medium", "Hard"])
-        self.combo.setStyleSheet("padding:8px;")
+        self.combo.setCurrentText("Easy")  # FIXED DEFAULT
         self.combo.currentTextChanged.connect(self.set_diff)
+
+        self.diff = self.combo.currentText()  # SYNC VALUE
 
         layout.addWidget(self.combo)
 
@@ -313,25 +299,25 @@ class Game(QWidget):
         self.btns[i].setText("X")
 
         if check_win(self.board, 1):
-            save_result(self.parent.user, "win", self.diff)
+            save_result(self.parent.user, "win", self.combo.currentText())
             QMessageBox.information(self, "Result", "You Win!")
             self.reset()
             return
 
-        ai_move(self.board, self.diff)
+        ai_move(self.board, self.combo.currentText())
 
-        for i in range(9):
-            if self.board[i] == 2:
-                self.btns[i].setText("O")
+        for j in range(9):
+            if self.board[j] == 2:
+                self.btns[j].setText("O")
 
         if check_win(self.board, 2):
-            save_result(self.parent.user, "loss", self.diff)
+            save_result(self.parent.user, "loss", self.combo.currentText())
             QMessageBox.information(self, "Result", "AI Wins!")
             self.reset()
             return
 
         if len(available(self.board)) == 0:
-            save_result(self.parent.user, "draw", self.diff)
+            save_result(self.parent.user, "draw", self.combo.currentText())
             QMessageBox.information(self, "Result", "Draw!")
             self.reset()
 
@@ -341,16 +327,23 @@ class Game(QWidget):
             b.setText("")
 
     def show_stats(self):
-        data = get_stats(self.parent.user)
+        data = get_stats(self.parent.user, self.combo.currentText())
 
-        msg = "YOUR PERFORMANCE\n\n"
-        for r, d in data:
-            msg += f"{r.upper()} - {d}\n"
+        wins = sum(1 for r in data if r[0] == "win")
+        losses = sum(1 for r in data if r[0] == "loss")
+        draws = sum(1 for r in data if r[0] == "draw")
 
+        msg = f"""
+STATS ({self.combo.currentText()})
+
+Wins   : {wins}
+Losses : {losses}
+Draws  : {draws}
+"""
         QMessageBox.information(self, "Stats", msg)
 
 
-# ================= MAIN APP =================
+# ================= MAIN =================
 
 class App(QStackedWidget):
     def __init__(self):
@@ -363,8 +356,6 @@ class App(QStackedWidget):
         self.addWidget(self.login)
         self.addWidget(self.game)
 
-
-# ================= RUN =================
 
 app = QApplication(sys.argv)
 window = App()
